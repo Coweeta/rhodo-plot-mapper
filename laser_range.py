@@ -1,3 +1,22 @@
+"""Interface to Laser Technologies Inc. TruPulse 360R laser range finder.
+
+Allows control and interrogation of the 360R.
+
+Works with the Bluetooth interface; may work with the RS232 interface too.
+
+Requires the pynmea2 module to decypher the NMEA0183 compliant response strings.
+Requires the pyserial module to access the serial interface.
+
+The URL for the product is:
+http://www.lasertech.com/TruPulse-Laser-Rangefinder.aspx
+
+The interface is defined in the LTI TruPulse 360R User's Manual
+(First Edition (c) 2011 p/n 0144860); "LTI TruPulse 360 R UM.1.pdf"
+In particular Section 8 - Serial Data Interface, page 42
+
+
+"""
+
 import serial
 import pynmea2
 
@@ -6,6 +25,26 @@ class TruPulseException(Exception):
 
 
 def parse_list_result(match_list, raw_list):
+    """Checks that a list of values matches the form specified in a format list.
+
+    Entries in the match_list can either be tuples or single values.  If a
+    single value, e.g. a string or integer, then the corresponding entry in the
+    raw_list must match exactly.  For tuple items, the corresponding raw_list
+    entry is converted and added to the results dictionary that is returned.
+
+    Tuple entries consist of two elements: the key name to be used in the result
+    and the function to call to convert the raw_list item.
+
+    Example:
+    parse_list_result(
+        ['first:', ('1st', int), 'second:', ('2nd', float)],
+        ['first:', '555', 'second:', '1.23']
+        )
+    would return {'1st': 555, '2nd': 1.23}.
+    If elements 0 and 2 were not 'first:' and 'second:' respectively then an
+    exception is thrown.  Exceptions thrown by the conversion functions are not
+    caught.
+    """
     if len(match_list) != len(raw_list):
         raise Exception('len("{}") != len("{}") ({}, {})'.format(match_list, data_list, len(match_list), len(raw_list)))
 
@@ -69,6 +108,12 @@ class TruPulseInterface(object):
         self._send_command('MM,0')
 
     def set_height_mode(self):
+        """Tell instrument to switch to height measuring mode.
+
+        When get_reading() is run the returned result will be a dictionary with
+        the single entry, 'height', which is the computed height of the target
+        in meters.
+        """
         self.expected = [
             'T', 'HT',
             ['height', float], 'M',
@@ -76,15 +121,29 @@ class TruPulseInterface(object):
         self._send_command('MM,4')
 
     def set_declination(self, dec):
+        """Program the angle between True North and Magnetic North.
+
+        This is given as the number of degrees that Magnetic North is west of
+        True North (for the current location).
+        """
         command = 'DE,{:1.1f}'.format(dec)
         self._send_command(command)
 
+
     def set_defaults(self):
+        """Specify we use meters and degrees for all measurements."""
+        self._send_command('TM,0')  # Target Mode is "normal" (single shot).
         self._send_command('AU,0')  # angles in degrees
         self._send_command('DU,0')  # distances in meters
 
 
     def get_voltage(self):
+        """Reads the battery voltage from the unit.
+
+        Returns the potential in volts as a float.
+
+        The warning level is 2.15V.
+        """
         self._send_command('BV', expect_okay=False)  # angles in degrees
         raw_output = self._readline()
         out_list = raw_output.split(',')
@@ -94,10 +153,22 @@ class TruPulseInterface(object):
 
 
     def turn_off(self):
+        """Instruct the range finder to shutdown.
+
+        Also closes the serial port.
+        """
         self._send_command('PO', expect_okay=False)
         self.ser.close()
 
+
     def get_reading(self):
+        """Trigger a measurement and read the result.
+
+        Requires that one of set_height_mode() or set_horiz_vector_mode() has
+        been called.
+
+        Returns a dictionary containing the results fields.
+        """
         self._send_command('GO')
         raw_output = self._readline()
         msg = pynmea2.parse(raw_output)
@@ -108,76 +179,48 @@ class TruPulseInterface(object):
         self._send_command('ST')
 
 if __name__ == "__main__":
-    dev_name = "/dev/rfcomm0"
+
+    import sys
+
+    def user_command(command_list):
+        inp = raw_input("option: ").upper()
+        if inp[0] in ['H', '?']:
+            for idx, entry in enumerate(command_list):
+                print "{:2}: {}".format(idx, entry[0])
+            print " Q: quit"
+            print " ?: help"
+            return True
+        if inp[0] == 'Q':
+            return False
+        try:
+            idx = int(inp)
+            entry = command_list[idx]
+        except:
+            print "Bad command"
+            return True
+
+        command = entry[1]
+        result = command()
+        print result
+        return True
+
+
+    dev_name = sys.argv[1]
+    "/dev/rfcomm0"
     tp = TruPulseInterface(dev_name, trace=True)
     tp.set_horiz_vector_mode()
-    while True:
-        inp = raw_input("#: ")
-        r = tp.get_reading()
-        print r
 
+    commands = [
+        ('get_voltage', tp.get_voltage),
+        ('set_horiz_vector_mode', tp.set_horiz_vector_mode),
+        ('set_height_mode', tp.set_height_mode),
+        ('get_reading', tp.get_reading),
+        ('set_defaults', tp.set_defaults),
+        ('turn_off', tp.turn_off),
+        ('stop_measurement', tp.stop_measurement)
 
-"""
-    def parse_hv_result(msg):
+    ]
 
-        return parse_lti_result(msg, match)
-
-def parse_id_result(msg):
-    match = ['T', 'ID', ['model', str], 'M', ['version', str]]
-    return parse_lti_result(msg, match)
-
-
-def request_
-def measure_hv(con):
-    ser.flush()
-    send_req('GO')
-    ser.readline()
-
-
-
-
-    In [16]: s.readline()
-Out[16]: '$ID,TP360 MAIN,3.28,07-28-2011\r\n'
-
-In [17]: s.readline()
-Out[17]: '$OK\r\n'
-
-In [18]: s.readline()
-Out[18]: '$PLTIT,HV,3.00,M,136.60,D,-0.20,D,3.00,M*4A\r\n'
-
-In [19]: s.write('$GO\r\n')
-Out[19]: 5
-
-In [20]: s.readline()
-Out[20]: '$OK\r\n'
-
-In [21]: s.readline()
-Out[21]: '$PLTIT,HV,3.10,M,141.10,D,4.50,D,3.10,M*63\r\n'
-
-s = serial.Serial(dev_name ,38400)
-
-def send(s, cmd):
-    s.write('${}\r\n'.format(cmd))
-
-send(s, 'ID')
-s.write('$GO')
-s.readline()
-s.write('$ID')
-s.write('$ID\r\n')
-s.write('$ID\r\n')
-s.readline()
-s.write('$GO\r\n')
-s.readline()
-s.readline()
-s.readline()
-s.write('$GO\r\n')
-
-data = '$PLTIT,HV,3.00,M,136.60,D,-0.20,D,3.00,M*4A\r\n'
-
-
-In [23]: msg = pynmea2.parse(data)
-
-In [24]: msg
-Out[24]: <ProprietarySentence() data=['T', 'HV', '3.00', 'M', '136.60', 'D', '-0.20', 'D', '3.00', 'M']>
-
-"""
+    cont = True
+    while cont:
+        cont = user_command(commands)
