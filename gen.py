@@ -71,7 +71,16 @@ def solve(refs, readings, points):
 
     est = pd.DataFrame({'ew':plsq[0][len(points):], 'ns':plsq[0][:len(points)]}, index=names)
 
+    all_points = pd.concat((est, refs))
+
+    nse = all_points.loc[readings['from']]['ns'].values - (all_points.loc[readings['to']]['ns'].values - dm.real)
+    ewe = all_points.loc[readings['from']]['ew'].values - (all_points.loc[readings['to']]['ew'].values - dm.imag)
+
+    readings['dev'] = np.sqrt(nse**2 + ewe**2)
+
     return est
+
+
 
 
 def stuff(readings, refs, points, anchor_to):
@@ -99,15 +108,15 @@ def stuff(readings, refs, points, anchor_to):
         return (nsf, ewf, nsf + dns, ewf + dew)
 
 
+
 def show_map(fig, refs, readings=None, meas=None, pts=None, actual=None, est=None):
     ax = fig.add_subplot(111, aspect='equal')
     if readings is not None and pts is not None:
         rf = readings[readings['from']==pts]
-        nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=True)
-        plt.plot([ewf, ewt], [nsf, nst], 'g-')
-        rf = readings[readings['from']==pts]
+        #nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=True)
+        #plt.plot([ewf, ewt], [nsf, nst], 'y-')
         nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=False)
-        plt.plot([ewf, ewt], [nsf, nst], 'r-')
+        plt.plot([ewf, ewt], [nsf, nst], 'y-')
 
     #for i in range(len(xcomp)):
     #    plt.plot([actual_points[i].real,xcomp[i].real], [actual_points[i].imag,xcomp[i].imag], 'r-')
