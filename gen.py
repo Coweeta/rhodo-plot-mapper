@@ -4,51 +4,49 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.optimize import leastsq
 
-#    radius = np.csc(angle / 2) * edge_len
-
-def make_ref_points(radius, num):
-    angle = np.linspace(start=0, stop=2*np.pi, num=num, endpoint=False)
-    ns = radius * np.cos(angle)
-    ew = radius * np.sin(angle)
-    names = ['R{}'.format(chr(ord('a') + i)) for i in range(num)]
-
-    refs = pd.DataFrame({'ns':ns, 'ew':ew, 'name':names})
+def gen_ref_points(edge_len):
+    e = edge_len
+    refs = pd.DataFrame({'ns':[0, 0, e, e], 'ew':[0, e, 0, e]} , index=['RA', 'RB', 'RC', 'RD'])
     return refs
 
 
-def gen_points(edge_len, refs, Np, Nme, err):
+def gen_meas_points(edge_len, num):
+    ns = edge_len * np.random.rand(num)
+    ew = edge_len * np.random.rand(num)
+    names = ['T{:02}'.format(i) for i in range(num)]
 
-    Nr = 4
-    Nt = Np + Nr
-
-    fp = np.repeat(np.arange(Nr, Nt, dtype=int), Nme)
-    offset = np.random.randint(1, Nt, (Np * Nme))
-    tp = np.mod(fp + offset, Nt)
-
-    ns = edge_len * np.random.rand(Np)
-    ew = edge_len * np.random.rand(Np)
-
-    ans = np.hstack((refs['ns'], ns))
-    aew = np.hstack((refs['ew'], ew))
+    points = pd.DataFrame({'ns':ns, 'ew':ew}, index=names)
+    return points
 
 
-    nsd = ans[tp] - ans[fp] + np.random.randn(Np * Nme) * err
-    ewd = aew[tp] - aew[fp] + np.random.randn(Np * Nme) * err
+def gen_readings(refs, points, num_per_point, err):
+
+    all_points = pd.concat((points, refs))
+
+    num_meas = num_per_point * len(points)
+
+    fp = np.repeat(np.arange(len(points), dtype=int), num_per_point)
+    offset = np.random.randint(1, len(all_points), num_meas)
+    tp = np.mod(fp + offset, len(all_points))
+
+    ns = all_points['ns'].values
+    ew = all_points['ew'].values
+    names = all_points.index.values
+
+    nsd = ns[tp] - ns[fp] + np.random.randn(num_meas) * err
+    ewd = ew[tp] - ew[fp] + np.random.randn(num_meas) * err
 
     dist = np.sqrt(nsd**2 + ewd**2)
     azim = 360 * np.arctan2(ewd, nsd) / (2 * np.pi)
 
-    readings = pd.DataFrame(data={'from':fp, 'to':tp, 'hdist':dist, 'azim':azim})
+    readings = pd.DataFrame(data={'from':names[fp], 'to':names[tp], 'hdist':dist, 'azim':azim})
 
-    names = ['T{:02}'.format(i+Nr) for i in range(Np)]
-    points = pd.DataFrame({'ns':ns, 'ew':ew, 'name':names})
-
-    return points, readings
+    return readings
 
 
 def residual(x, xref, f, t, dm, Np):
     xcomp = x[:Np] + 1j * x[Np:]
-    xall = np.hstack((xref,xcomp))
+    xall = np.hstack((xcomp, xref))
     xt = xall[t]
     xf = xall[f]
 
@@ -56,15 +54,22 @@ def residual(x, xref, f, t, dm, Np):
     return err
 
 
-def solve(refs, readings, Np):
-    xpp = np.zeros(2 * Np)
+def solve(refs, readings, points):
+    names = points.index
+    xpp = np.hstack((points['ew'].values, points['ns'].values))
+
     xref = refs['ns'] + 1j * refs['ew']
     angle = np.pi * readings['azim'].values / 180
     dist = readings['hdist'].values
     dm = dist * np.exp(1j * angle)
-    plsq = leastsq(residual, xpp, args=(xref, readings['from'], readings['to'], dm, Np))
 
-    est = pd.DataFrame({'ns':plsq[0][:Np], 'ew':plsq[0][Np:]})
+    a = pd.concat((points, refs))
+    ti = [a.index.get_loc(t) for t in readings['to']]
+    fi = [a.index.get_loc(f) for f in readings['from']]
+
+    plsq = leastsq(residual, xpp, args=(xref, fi, ti, dm, len(points)))
+
+    est = pd.DataFrame({'ew':plsq[0][len(points):], 'ns':plsq[0][:len(points)]}, index=names)
 
     return est
 
@@ -73,14 +78,17 @@ def stuff(readings, refs, points, anchor_to):
     angle = np.pi * readings['azim'].values / 180
     dist = readings['hdist'].values
 
+    all_points = pd.concat((refs, points))
     ns = np.hstack((refs['ns'], points['ns']))
     ew = np.hstack((refs['ew'], points['ew']))
 
-    nsf = ns[readings['from']]
-    ewf = ew[readings['from']]
+    from_readings = all_points.loc[readings['from']]
+    nsf = from_readings['ns']
+    ewf = from_readings['ew']
 
-    nst = ns[readings['to']]
-    ewt = ew[readings['to']]
+    to_readings = all_points.loc[readings['to']]
+    nst = to_readings['ns']
+    ewt = to_readings['ew']
 
     dns = dist * np.cos(angle)
     dew = dist * np.sin(angle)
@@ -107,15 +115,20 @@ def show_map(fig, refs, readings=None, meas=None, pts=None, actual=None, est=Non
     plt.scatter(refs['ew'], refs['ns'], marker='^', c='g', s=100)
     ns = refs['ns']
     ew = refs['ew']
-    names = refs['name']
+    names = refs.index
     for i in range(len(ns)):
         plt.text(ew[i], ns[i], names[i])
 
     if actual is not None:
+        if est is not None:
+            plt.plot(
+                [est['ew'], actual['ew']],
+                [est['ns'], actual['ns']],
+                'y-')
         plt.scatter(actual['ew'], actual['ns'], marker='o', c='y', s=100)
         ns = actual['ns']
         ew = actual['ew']
-        names = actual['name']
+        names = actual.index
         for i in range(len(ns)):
             plt.text(ew[i], ns[i], names[i], ha='center', va='center')
 
