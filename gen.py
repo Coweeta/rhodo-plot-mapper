@@ -6,7 +6,7 @@ from scipy.optimize import leastsq
 
 def gen_ref_points(edge_len):
     e = edge_len
-    refs = pd.DataFrame({'ns':[0, 0, e, e], 'ew':[0, e, 0, e]} , index=['RA', 'RB', 'RC', 'RD'])
+    refs = pd.DataFrame({'ns':[0, 0, e, e], 'ew':[0, e, e, 0]} , index=['Rsw', 'Rse', 'Rne', 'Rnw'])
     return refs
 
 
@@ -39,7 +39,7 @@ def gen_readings(refs, points, num_per_point, err):
     dist = np.sqrt(nsd**2 + ewd**2)
     azim = 360 * np.arctan2(ewd, nsd) / (2 * np.pi)
 
-    readings = pd.DataFrame(data={'from':names[fp], 'to':names[tp], 'hdist':dist, 'azim':azim})
+    readings = pd.DataFrame(data={'from':names[fp], 'to':names[tp], 'hdist':dist, 'azim':azim, 'invalid':False})
 
     return readings
 
@@ -55,17 +55,18 @@ def residual(x, xref, f, t, dm, Np):
 
 
 def solve(refs, readings, points):
+    valid_readings = readings[~readings['invalid']]
     names = points.index
     xpp = np.hstack((points['ew'].values, points['ns'].values))
 
     xref = refs['ns'] + 1j * refs['ew']
-    angle = np.pi * readings['azim'].values / 180
-    dist = readings['hdist'].values
+    angle = np.pi * valid_readings['azim'].values / 180
+    dist = valid_readings['hdist'].values
     dm = dist * np.exp(1j * angle)
 
     a = pd.concat((points, refs))
-    ti = [a.index.get_loc(t) for t in readings['to']]
-    fi = [a.index.get_loc(f) for f in readings['from']]
+    ti = [a.index.get_loc(t) for t in valid_readings['to']]
+    fi = [a.index.get_loc(f) for f in valid_readings['from']]
 
     plsq = leastsq(residual, xpp, args=(xref, fi, ti, dm, len(points)))
 
@@ -73,11 +74,15 @@ def solve(refs, readings, points):
 
     all_points = pd.concat((est, refs))
 
-    nse = all_points.loc[readings['from']]['ns'].values - (all_points.loc[readings['to']]['ns'].values - dm.real)
-    ewe = all_points.loc[readings['from']]['ew'].values - (all_points.loc[readings['to']]['ew'].values - dm.imag)
+    nsp = all_points.loc[valid_readings['to']]['ns'].values - dm.real
+    ewp = all_points.loc[valid_readings['to']]['ew'].values - dm.imag
 
-    readings['dev'] = np.sqrt(nse**2 + ewe**2)
+    nse = all_points.loc[valid_readings['from']]['ns'].values - nsp
+    ewe = all_points.loc[valid_readings['from']]['ew'].values - ewp
 
+    print len(nse), len(readings), len(readings.loc[~readings['invalid']])  #TEMP!!!
+    readings.loc[~readings['invalid'],'dev'] = np.sqrt(nse**2 + ewe**2)
+    readings.loc[readings['invalid'],'dev'] = np.nan
     return est
 
 
@@ -126,7 +131,10 @@ def show_map(fig, refs, readings=None, meas=None, pts=None, actual=None, est=Non
     ew = refs['ew']
     names = refs.index
     for i in range(len(ns)):
-        plt.text(ew[i], ns[i], names[i])
+        plt.annotate(
+            names[i], xytext = (0, -20),
+            textcoords = 'offset points', ha = 'center', va = 'bottom',
+            xy = (ew[i], ns[i]))
 
     if actual is not None:
         if est is not None:
@@ -139,7 +147,10 @@ def show_map(fig, refs, readings=None, meas=None, pts=None, actual=None, est=Non
         ew = actual['ew']
         names = actual.index
         for i in range(len(ns)):
-            plt.text(ew[i], ns[i], names[i], ha='center', va='center')
+            plt.annotate(
+                names[i], xytext = (0, -20),
+                textcoords = 'offset points', ha = 'center', va = 'bottom',
+                xy = (ew[i], ns[i]))
 
     if est is not None:
         plt.scatter(est['ew'], est['ns'], marker='o', c='r', s = 20)
