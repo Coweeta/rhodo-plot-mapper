@@ -49,7 +49,7 @@ def residual(x, xref, f, t, dm, Np):
     xall = np.hstack((xcomp, xref))
     xt = xall[t]
     xf = xall[f]
-
+    
     err = np.abs(dm - (xt - xf))
     return err
 
@@ -58,8 +58,9 @@ def solve(refs, readings, points):
     valid_readings = readings[~readings['invalid']]
     names = points.index
     xpp = np.hstack((points['ew'].values, points['ns'].values))
+    xpp = np.nan_to_num(xpp)
 
-    xref = refs['ns'] + 1j * refs['ew']
+    xref = refs['ns'].values + 1j * refs['ew'].values
     angle = np.pi * valid_readings['azim'].values / 180
     dist = valid_readings['hdist'].values
     dm = dist * np.exp(1j * angle)
@@ -83,6 +84,7 @@ def solve(refs, readings, points):
     print len(nse), len(readings), len(readings.loc[~readings['invalid']])  #TEMP!!!
     readings.loc[~readings['invalid'],'dev'] = np.sqrt(nse**2 + ewe**2)
     readings.loc[readings['invalid'],'dev'] = np.nan
+    
     return est
 
 
@@ -114,13 +116,13 @@ def stuff(readings, refs, points, anchor_to):
 
 
 
-def show_map(fig, refs, readings=None, meas=None, pts=None, actual=None, est=None):
+def show_map(fig, refs, readings=None, pts=None, actual=None, est=None):
     ax = fig.add_subplot(111, aspect='equal')
     if readings is not None and pts is not None:
         rf = readings[readings['from']==pts]
         #nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=True)
         #plt.plot([ewf, ewt], [nsf, nst], 'y-')
-        nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=False)
+        nsf, ewf, nst, ewt = stuff(rf, refs, est, anchor_to=False)
         plt.plot([ewf, ewt], [nsf, nst], 'y-')
 
     #for i in range(len(xcomp)):
@@ -154,4 +156,13 @@ def show_map(fig, refs, readings=None, meas=None, pts=None, actual=None, est=Non
 
     if est is not None:
         plt.scatter(est['ew'], est['ns'], marker='o', c='r', s = 20)
+        if actual is None:
+            ns = est['ns']
+            ew = est['ew']
+            names = est.index
+            for i in range(len(ns)):
+                plt.annotate(
+                    names[i], xytext = (0, -20),
+                    textcoords = 'offset points', ha = 'center', va = 'bottom',
+                    xy = (ew[i], ns[i]))
 

@@ -16,7 +16,7 @@ In particular Section 8 - Serial Data Interface, page 42
 
 
 """
-
+import re
 import serial
 import pynmea2
 
@@ -51,7 +51,7 @@ def parse_list_result(match_list, raw_list):
     res = {}
     for idx, match in enumerate(match_list):
         data = raw_list[idx]
-        if isinstance(match, list):
+        if isinstance(match, tuple):
              key, conv_fn = match
              res[key] = conv_fn(data)
         else:
@@ -64,7 +64,7 @@ def parse_list_result(match_list, raw_list):
 class TruPulseInterface(object):
 
 
-    def __init__(self, dev_name, trace=False, timeout=10.0):
+    def __init__(self, dev_name, trace=False, timeout=20.0):
         self.timeout = timeout
         self.ser = serial.Serial(port=dev_name, baudrate=38400, timeout=self.timeout)
         self.trace = trace
@@ -100,10 +100,10 @@ class TruPulseInterface(object):
     def set_horiz_vector_mode(self):
         self.expected = [
             'T', 'HV',
-            ['horz_dist', float], 'M',
-            ['azimuth', float], 'D',
-            ['incline', float], 'D',
-            ['slope', float], 'M'
+            ('horz_dist', float), 'M',
+            ('azimuth', float), 'D',
+            ('incline', float), 'D',
+            ('slope', float), 'M'
             ]
         self._send_command('MM,0')
 
@@ -116,7 +116,7 @@ class TruPulseInterface(object):
         """
         self.expected = [
             'T', 'HT',
-            ['height', float], 'M',
+            ('height', float), 'M',
             ]
         self._send_command('MM,4')
 
@@ -177,6 +177,16 @@ class TruPulseInterface(object):
 
     def stop_measurement(self):
         self._send_command('ST')
+        
+        
+    def get_firmware_version(self):
+        self._send_command('PLTIT,RQ,ID', expect_okay=False)
+        raw_output = self._readline()
+        msg = re.split(',|\\*', raw_output)
+        return parse_list_result(
+            ['$ID', ('model', str), ('version', float), ('cksum', str)],
+            msg
+            )
 
 if __name__ == "__main__":
 
@@ -217,9 +227,8 @@ if __name__ == "__main__":
         ('get_reading', tp.get_reading),
         ('set_defaults', tp.set_defaults),
         ('turn_off', tp.turn_off),
-        ('stop_measurement', tp.stop_measurement)
-
-    ]
+        ('stop_measurement', tp.stop_measurement),
+        ('get_firmware_version', tp.get_firmware_version)]
 
     cont = True
     while cont:
