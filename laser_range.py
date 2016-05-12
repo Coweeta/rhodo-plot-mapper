@@ -168,9 +168,13 @@ class TruPulseInterface(object):
         been called.
 
         Returns a dictionary containing the results fields.
+        
+        If the unit errors, then returns None
         """
         self._send_command('GO')
         raw_output = self._readline()
+        if raw_output == "$E01":
+            return None
         msg = pynmea2.parse(raw_output)
         return parse_list_result(self.expected, msg.data)
 
