@@ -11,13 +11,78 @@ import pyttsx
 def say(text):
     engine = pyttsx.init()
     engine.setProperty('rate', 150)
-    engine.setProperty('voice', 'english')
+    engine.setProperty('voice', 'american')
     engine.say(text)
     engine.runAndWait()
 
-
+"""
+class Mapper(object):
     
+def go_to(self, args):
+    if args[0] not in self._p.index:
+        return "No such point"
+    self._from = args[0]
+    return None
+    
+def target(self, args):
+    if args[0] not in self._p.index:
+        return "No such point"
+    self._to = args[0]
+    self._get_reading()
+    
+    
+def redo(self, args):
+    self._get_reading()
+    
+"""
 
+
+def multi_reading(tp, new_vector=True, prev_reading=None, repeats=3):   
+    
+    readings = []
+    
+    for i in range(repeats):
+        say('click {}'.format(i+1))
+        reading = tp.get_reading()
+        if reading is None:
+            print "TruPulse reported an error."
+            say('error')
+        inaccuracy_flag = int(100 * reading['horz_dist']) % 2
+        if inaccuracy_flag:
+            print "reading inaccurate ({})".format(reading)
+            say('inaccurate')
+        readings.append(reading)
+        sleep(1)
+    
+    if new_vector and prev_reading and prev_reading == readings[0]:
+        print "got duplicate ({})".format(reading)
+        say('duplicate')
+        readings.pop(0)
+        
+    if not readings:
+        say("no readings")
+        return None
+        
+    d = [r['horz_dist'] for r in readings]
+    a = [r['azimuth'] for r in readings]    
+
+    if a[0] > 270 or a[0] < 90:
+        # we're pointing around north; change azimuth range to -180 to 180
+        for i, x in enumerate(a):
+            if x > 180:
+                a[i] = x - 360.0
+
+    d_spread = max(d) - min(d)
+    a_spread = max(a) - min(a)
+    if d_spread > 0.2 or a_spread > 1.0:
+        say("variation")
+        print d_spread, a_spread, readings
+        return None
+        
+        
+    say('Got {:0.1f} meters bearing {}'.format(d[0], bearing(a[0])))
+    return readings[0]
+    
 
 
 def read_file(filename):
@@ -27,7 +92,6 @@ def read_file(filename):
     return points
 
 
-# "/dev/rfcomm0"
 
 
 def get_pos(reading, ref_pos):
@@ -62,77 +126,7 @@ def create_point(name, points):
 
         break
 
-last = None
-
-
-def matches_last(r, name, ref_name):
-    global last
-    if last is None or r != last[0]:
-       last = (r, name, ref_name)
-       return False
-       
-    if name == last[1] and ref_name == last[2]:
-        return False
-        
-    return True   
-                    
-
-def loop(tp, points, readings):
-    while True:
-        name = raw_input("This point's name: ('$' to quit, '?' for list) ")
-        if name == '$':
-            return True
-        if name == '?':
-            print "\n".join(sorted(points.index))
-            continue
-        if not name:
-            continue
-        if name not in points.index:
-            create_point(name, points)
-            
-        break
-
-    while True:
-        ref_name = raw_input("Ref point's name: ('?' for list) ")
-        if ref_name == '?':
-            print "\n".join(sorted(points.index))
-            continue
-        if ref_name not in points.index:
-            create_point(ref_name, points)
-            break
-        if ref_name == name:
-            print "Can't be current location"
-            continue
-        break
-
     
-    #TEMP!!! tp.set_horiz_vector_mode()  #TEMP!!! workaround to avoid old result
-    
-    while True:
-        say('click')
-        r = tp.get_reading()
-        if r is None:
-            print "TruPulse reported an error."
-            say('error')
-            return False
-            
-        if matches_last(r, name, ref_name):
-            print "got duplicate ({}); redoing...".format(r)
-            say('duplicate')
-            sleep(3)
-            continue
-        break    
-        
-    inaccuracy_flag = int(100 * r['horz_dist']) % 2
-    if inaccuracy_flag:
-        print "reading inaccurate ({})".format(r)
-        say('inaccurate')
-    
-    say('{} is {:0.1f} meters from {}. . . bearing {}'.format(ref_name, r['horz_dist'], name, bearing(r['azimuth'])))
-    readings.loc[len(readings)] = {'from':name, 'to':ref_name, 'azim': r['azimuth'], 'hdist': r['horz_dist'], 'invalid':False, 'dev': np.nan}
-    print r
-    
-    return False
 
 def bearing(azimuth):
     angle = azimuth + 22.5
@@ -154,13 +148,15 @@ def main():
     
     say('Hello mapper.')
     
-    print readings
-    print points
+    loc = None
+    target = None
+    last = None
     
     tp = None
     while True:
         cmd = raw_input('Action: ("?" for help) ')
-        if cmd == 'r':
+        
+        if cmd == 'l':
            readings = read_file(reading_filename)
            print readings
            continue
@@ -209,6 +205,11 @@ def main():
             print "Readings"
             print readings
             continue
+            
+        if cmd == 'n':
+            name = raw_input("New point's name: ")
+            create_point(name, points)
+            continue
   
         if cmd == 'm':
             pts = raw_input('point to highlight: ')
@@ -226,14 +227,37 @@ def main():
             continue
             
         if cmd == 'g':
-            if tp is None:
-                print 'connect first'
+            name = raw_input("This point's name: ")
+            if not name or name not in points.index:
+                print "Bad name."
                 continue
-            while True:
-                done = loop(tp, points, readings)
-                if done:
-                    break
+                
+            loc = name
             continue
+            
+        if cmd == 't':
+            name = raw_input("Target's name: ")
+            if not name or name not in points.index:
+                print "Bad name."
+                continue
+            target = name
+            r = multi_reading(tp, prev_reading=last)
+            if r is not None:
+                last = r
+                readings.loc[len(readings)] = {'from':loc, 'to':target, 'azim': r['azimuth'], 'hdist': r['horz_dist'], 'invalid':False, 'dev': np.nan}
+            continue        
+           
+        if cmd == 'r':
+            r = multi_reading(tp, prev_reading=last, new_vector=False)
+            if r is not None:
+                last = r
+                readings.loc[len(readings)] = {'from':loc, 'to':target, 'azim': r['azimuth'], 'hdist': r['horz_dist'], 'invalid':False, 'dev': np.nan}
+            continue
+            
+        if cmd == 'd':
+            readings.loc[len(readings)-1, 'invalid'] = True
+            continue
+            
 
         if cmd == 's':
             readings.to_excel('readings2.xls', startrow=2)
@@ -252,31 +276,27 @@ def main():
                     pass
                 
         if cmd == '?':
-            print 'e: evaluate\ng: gather\ns: save\ni: invalidate reading\np: print values\nm: map values\nc: connect to TruPulse\nv: get version\nr; read in readings file\nq: quit\n'
+            print """
+                e: evaluate
+                g: goto next point
+                t: target reading
+                d: delete last reading
+                s: save file
+                n: new point
+                l: load file
+                i: invalidate reading
+                p: print values
+                m: map values
+                c: connect to TruPulse
+                v: get version
+                r: repeat last meas
+                q: quit
+                """
             continue
             
         if cmd == 'q':
             break
             
    
-    
-
-def plot_points(points, psorts):
-    keys = points.keys()
-    values = np.array(points.values())
-    sorts = np.array(psorts.values())
-    cmapper = np.array([0.1, 0.2, 0.3, 0.4])
-    smapper = 100 * np.array([1,2,3,4])
-
-    plt.scatter(
-        values.real, values.imag, marker='o', c=cmapper[sorts], s=smapper[sorts])
-
-    for label, loc in zip(keys, values):
-        plt.annotate(
-            label, xytext = (0, -20),
-            textcoords = 'offset points', ha = 'center', va = 'bottom',
-            xy = (loc.real, loc.imag))
-
-    plt.show()
     
 main()    
