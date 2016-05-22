@@ -19,6 +19,7 @@ In particular Section 8 - Serial Data Interface, page 42
 import re
 import serial
 import pynmea2
+import time  #TEMP!!! 
 
 class TruPulseException(Exception):
     """Something wrong from the TruPulse."""
@@ -46,7 +47,7 @@ def parse_list_result(match_list, raw_list):
     caught.
     """
     if len(match_list) != len(raw_list):
-        raise Exception('len("{}") != len("{}") ({}, {})'.format(match_list, data_list, len(match_list), len(raw_list)))
+        raise Exception('len("{}") != len("{}") ({}, {})'.format(match_list, raw_list, len(match_list), len(raw_list)))
 
     res = {}
     for idx, match in enumerate(match_list):
@@ -75,6 +76,10 @@ class TruPulseInterface(object):
 
         text = "${}\r\n".format(cmd)
 
+        self.ser.write("\r\n")      #TEMP!!! 
+        time.sleep(0.1)
+        
+        
         if self.trace:
             self.ser.timeout = 0.0
             left = self.ser.read(10000)
@@ -218,6 +223,13 @@ if __name__ == "__main__":
         print result
         return True
 
+    def hand_roll():
+        cmd = raw_input("cmd: (without $) ")
+        try:
+            tp._send_command(cmd)
+        except:
+            print "fault"
+        
 
     dev_name = sys.argv[1]
     "/dev/rfcomm0"
@@ -232,7 +244,8 @@ if __name__ == "__main__":
         ('set_defaults', tp.set_defaults),
         ('turn_off', tp.turn_off),
         ('stop_measurement', tp.stop_measurement),
-        ('get_firmware_version', tp.get_firmware_version)]
+        ('get_firmware_version', tp.get_firmware_version),
+        ('custom command', hand_roll)]
 
     cont = True
     while cont:

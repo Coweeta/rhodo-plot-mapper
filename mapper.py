@@ -109,10 +109,15 @@ def new_reading(tp, name, ref_name, readings):
 types = ['anchor', 'oak', 'rhodo']
 
 
-def create_point(name, points):
+def create_point(points):
             
-    print 'Creating new point "{}".'.format(name)
-
+    while True:
+        name = raw_input("New point's name: ")
+        if name in points.index:
+            print 'already exists'
+            continue
+        break
+        
     while True:
         sort = raw_input("This point's type id: ('?' for list) ")
         if sort == '?':
@@ -122,7 +127,19 @@ def create_point(name, points):
             sort = types[int(sort)]
         except:
             continue
-        points.loc[name] = {'type': sort, 'ew': np.nan, 'ns': np.nan}  
+        if sort == 'anchor':
+            ew = raw_input("East-west location: ")
+            ns = raw_input("North-south location: ")
+            try:
+                ew = float(ew)
+                ns = float(ns)
+            except:
+                print "bad"
+                continue
+        else:
+            ew = np.nan
+            ns = np.nan
+        points.loc[name] = {'type': sort, 'ew': ew, 'ns': ns}  
 
         break
 
@@ -130,21 +147,25 @@ def create_point(name, points):
 
 def bearing(azimuth):
     angle = azimuth + 22.5
-    octdrant = int(angle / 45.0) % 8
-    n = "north "
-    e = "east"
-    s = "south "
-    w = "west"
+    octdrant = int(np.floor(angle / 45.0)) % 8
+    n, e, s, w = "north ", "east", "south ", "west"
     return [n, n+e, e, s+e, s, s+w, w, n+w][octdrant]
     
+def get_name(text, default):
+    message = "{}: (<CR> for '{}') ".format(text, default)
+    name = raw_input(message)
+    if name == '':
+        name = default
+    return name
+        
 
 def main():
-    dev_name = sys.argv[1]
-    point_filename = sys.argv[2]
-    reading_filename = sys.argv[3]
+    dev_name = None
+    point_filename = "points.xlsx"
+    reading_filename = "readings.xlsx"
     
     readings = pd.DataFrame(columns=('azim', 'hdist', 'from', 'to', 'dev', 'invalid'))
-    points = read_file(point_filename)
+    points = pd.DataFrame(columns=('type', 'ew', 'ns'))
     
     say('Hello mapper.')
     
@@ -157,12 +178,17 @@ def main():
         cmd = raw_input('Action: ("?" for help) ')
         
         if cmd == 'l':
-           readings = read_file(reading_filename)
-           print readings
-           continue
+            point_filename = get_name("Device name", point_filename)
+            reading_filename = get_name("Device name", reading_filename)
+            points = read_file(point_filename)
+            readings = read_file(reading_filename)
+            print points
+            print readings
+            continue
     
 
         if cmd == 'c':
+            dev_name = get_name("Device name", "/dev/rfcomm0")
             try:
                 tp = laser_range.TruPulseInterface(dev_name, trace=True)
                 print 'got unit'
@@ -207,8 +233,7 @@ def main():
             continue
             
         if cmd == 'n':
-            name = raw_input("New point's name: ")
-            create_point(name, points)
+            create_point(points)
             continue
   
         if cmd == 'm':
@@ -260,8 +285,10 @@ def main():
             
 
         if cmd == 's':
-            readings.to_excel('readings2.xls', startrow=2)
-            points.to_excel('points2.xls', startrow=2)
+            point_filename = get_name("Device name", point_filename)
+            reading_filename = get_name("Device name", reading_filename)
+            readings.to_excel(reading_filename, startrow=2)
+            points.to_excel(point_filename, startrow=2)
             continue
             
         if cmd == 'i':

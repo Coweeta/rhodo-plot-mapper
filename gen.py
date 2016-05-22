@@ -55,7 +55,11 @@ def residual(x, xref, f, t, dm, Np):
 
 
 def solve(refs, readings, points):
-    valid_readings = readings[~readings['invalid']]
+    print readings
+    print readings.dtypes
+    print ~readings['invalid']
+    
+    valid_readings = readings.loc[~readings['invalid']]
     names = points.index
     xpp = np.hstack((points['ew'].values, points['ns'].values))
     xpp = np.nan_to_num(xpp)
@@ -72,6 +76,7 @@ def solve(refs, readings, points):
     plsq = leastsq(residual, xpp, args=(xref, fi, ti, dm, len(points)))
 
     est = pd.DataFrame({'ew':plsq[0][len(points):], 'ns':plsq[0][:len(points)]}, index=names)
+    est['type'] = points['type']
 
     all_points = pd.concat((est, refs))
 
@@ -81,7 +86,6 @@ def solve(refs, readings, points):
     nse = all_points.loc[valid_readings['from']]['ns'].values - nsp
     ewe = all_points.loc[valid_readings['from']]['ew'].values - ewp
 
-    print len(nse), len(readings), len(readings.loc[~readings['invalid']])  #TEMP!!!
     readings.loc[~readings['invalid'],'dev'] = np.sqrt(nse**2 + ewe**2)
     readings.loc[readings['invalid'],'dev'] = np.nan
     
@@ -115,9 +119,36 @@ def stuff(readings, refs, points, anchor_to):
         return (nsf, ewf, nsf + dns, ewf + dew)
 
 
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy.spatial import ConvexHull
+from matplotlib.path import Path
+
+def show_hull(points, ax):
+    """Add a polygon to a plot that contains all the points.
+    
+    This seems like a lot of work...
+    """
+    hull = ConvexHull(points)
+    vertices = hull.vertices
+    vertices.append((0,0))
+    codes = [Path.LINETO] * len(vertices)
+    codes[0] = Path.MOVETO
+    codes[-1] = Path.CLOSEPOLY
+    
+    path = Path(points[vertices], codes)
+    patch = patches.PathPatch(path, facecolor='orange', lw=2, alpha=0.3)
+    
+    ax.add_patch(patch)
+    
+    
+
 
 def show_map(fig, refs, readings=None, pts=None, actual=None, est=None):
     ax = fig.add_subplot(111, aspect='equal')
+    ax.set_xlabel('meters west of origin')
+    ax.set_ylabel('meters north of origin')
     if readings is not None and pts is not None:
         rf = readings[readings['from']==pts]
         #nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=True)
@@ -165,4 +196,5 @@ def show_map(fig, refs, readings=None, pts=None, actual=None, est=None):
                     names[i], xytext = (0, -20),
                     textcoords = 'offset points', ha = 'center', va = 'bottom',
                     xy = (ew[i], ns[i]))
+                
 
