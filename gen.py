@@ -4,6 +4,17 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.optimize import leastsq
 
+def gen_points_and_readings(edge_len, num_est, rpp, err):
+    refs = gen_ref_points(edge_len)
+    refs['type'] = 'anchor'
+    actual = gen_meas_points(edge_len, num_est)
+    actual['type'] = 'tree'
+    readings = gen_readings(refs, actual, rpp, err)
+    est = solve(refs, readings, actual)
+    points =  pd.concat((refs, est))
+    return points, readings, actual
+    
+    
 def gen_ref_points(edge_len):
     e = edge_len
     refs = pd.DataFrame({'ns':[0, 0, e, e], 'ew':[0, e, e, 0]} , index=['Rsw', 'Rse', 'Rne', 'Rnw'])
@@ -55,11 +66,8 @@ def residual(x, xref, f, t, dm, Np):
 
 
 def solve(refs, readings, points):
-    print readings
-    print readings.dtypes
-    print ~readings['invalid']
-    
-    valid_readings = readings.loc[~readings['invalid']]
+    valid = readings['invalid'] == False
+    valid_readings = readings[valid]
     names = points.index
     xpp = np.hstack((points['ew'].values, points['ns'].values))
     xpp = np.nan_to_num(xpp)
@@ -86,8 +94,8 @@ def solve(refs, readings, points):
     nse = all_points.loc[valid_readings['from']]['ns'].values - nsp
     ewe = all_points.loc[valid_readings['from']]['ew'].values - ewp
 
-    readings.loc[~readings['invalid'],'dev'] = np.sqrt(nse**2 + ewe**2)
-    readings.loc[readings['invalid'],'dev'] = np.nan
+    readings.loc[valid,'dev'] = np.sqrt(nse**2 + ewe**2)
+    readings.loc[~valid,'dev'] = np.nan
     
     return est
 
@@ -124,6 +132,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import ConvexHull
 from matplotlib.path import Path
+import matplotlib.patches as patches
 
 def show_hull(points, ax):
     """Add a polygon to a plot that contains all the points.
@@ -132,32 +141,48 @@ def show_hull(points, ax):
     """
     hull = ConvexHull(points)
     vertices = hull.vertices
-    vertices.append((0,0))
+    vertices = np.append(vertices, vertices[0])
     codes = [Path.LINETO] * len(vertices)
     codes[0] = Path.MOVETO
     codes[-1] = Path.CLOSEPOLY
     
     path = Path(points[vertices], codes)
-    patch = patches.PathPatch(path, facecolor='orange', lw=2, alpha=0.3)
+    patch = patches.PathPatch(path, facecolor='orange', lw=0, alpha=0.3)
     
     ax.add_patch(patch)
     
     
 
 
-def show_map(fig, refs, readings=None, pts=None, actual=None, est=None):
+
+
+def show_map(fig, points, readings=None, focus_points=None):
+    
+    if focus_points is None:
+        focus_points = []
+    refs = points[points['type'] == 'anchor']
+    est = points[points['type'] != 'anchor']
+    
     ax = fig.add_subplot(111, aspect='equal')
     ax.set_xlabel('meters west of origin')
     ax.set_ylabel('meters north of origin')
-    if readings is not None and pts is not None:
-        rf = readings[readings['from']==pts]
-        #nsf, ewf, nst, ewt = stuff(rf, refs, actual, anchor_to=True)
-        #plt.plot([ewf, ewt], [nsf, nst], 'y-')
-        nsf, ewf, nst, ewt = stuff(rf, refs, est, anchor_to=False)
-        plt.plot([ewf, ewt], [nsf, nst], 'y-')
-
-    #for i in range(len(xcomp)):
-    #    plt.plot([actual_points[i].real,xcomp[i].real], [actual_points[i].imag,xcomp[i].imag], 'r-')
+    if readings is not None:
+        for name in est.index:
+            pts = est.loc[name]
+            rf = readings[readings['from'] == name]
+            rt = readings[readings['to'] == name]
+            nsf, ewf, nsd, ewd = stuff(rf, refs, est, anchor_to=True)
+            nso, ewo, nst, ewt = stuff(rt, refs, est, anchor_to=False)
+            f_points = np.array([ewf, nsf]).T
+            t_points = np.array([ewt, nst]).T
+            a_points = np.append(f_points, t_points, axis=0)
+            if len(a_points) > 2:
+                show_hull(a_points, ax)
+            ax.scatter(ewf, nsf, marker='.', c='g', linewidths=0)
+            ax.scatter(ewt, nst, marker='.', c='r', linewidths=0)
+            if name in focus_points:
+                plt.plot([ewf, ewd], [nsf, nsd], 'y-')
+                plt.plot([ewo, ewt], [nso, nst], 'b-')
 
     plt.scatter(refs['ew'], refs['ns'], marker='^', c='g', s=100)
     ns = refs['ns']
@@ -169,32 +194,15 @@ def show_map(fig, refs, readings=None, pts=None, actual=None, est=None):
             textcoords = 'offset points', ha = 'center', va = 'bottom',
             xy = (ew[i], ns[i]))
 
-    if actual is not None:
-        if est is not None:
-            plt.plot(
-                [est['ew'], actual['ew']],
-                [est['ns'], actual['ns']],
-                'y-')
-        plt.scatter(actual['ew'], actual['ns'], marker='o', c='y', s=100)
-        ns = actual['ns']
-        ew = actual['ew']
-        names = actual.index
-        for i in range(len(ns)):
-            plt.annotate(
-                names[i], xytext = (0, -20),
-                textcoords = 'offset points', ha = 'center', va = 'bottom',
-                xy = (ew[i], ns[i]))
 
-    if est is not None:
-        plt.scatter(est['ew'], est['ns'], marker='o', c='r', s = 20)
-        if actual is None:
-            ns = est['ns']
-            ew = est['ew']
-            names = est.index
-            for i in range(len(ns)):
-                plt.annotate(
-                    names[i], xytext = (0, -20),
-                    textcoords = 'offset points', ha = 'center', va = 'bottom',
-                    xy = (ew[i], ns[i]))
-                
+    plt.scatter(est['ew'], est['ns'], marker='o', c='r', s = 20)
+    ns = est['ns']
+    ew = est['ew']
+    names = est.index
+    for i in range(len(ns)):
+        plt.annotate(
+            names[i], xytext = (0, -20),
+            textcoords = 'offset points', ha = 'center', va = 'bottom',
+            xy = (ew[i], ns[i]))
+        
 

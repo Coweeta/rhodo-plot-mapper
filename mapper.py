@@ -157,7 +157,7 @@ def get_name(text, default):
     if name == '':
         name = default
     return name
-        
+       
 
 def main():
     dev_name = None
@@ -215,7 +215,15 @@ def main():
                 print e
                 tp = None
             continue    
-                        
+            
+        if cmd == 'w':
+            # invalidate reading with worst deviation 
+            worst = readings['dev'].idxmax()
+            if isinstance(worst, int):
+                readings.loc[worst, 'invalid'] = True
+            continue
+            
+            
         if cmd == 'e':
             refs = points.loc[points['type'] == 'anchor']
             mp = points.loc[points['type'] != 'anchor']
@@ -237,17 +245,13 @@ def main():
             continue
   
         if cmd == 'm':
-            pts = raw_input('point to highlight: ')
-            if pts == '':
-                pts = None
-            elif pts not in points.index:
-                print 'not valid point name'
-                pts = None
+            pts = raw_input('names of points to highlight (space delimited): ')
+            pts == pts.split()
     
             refs = points.loc[points['type'] == 'anchor']
             mp = points.loc[points['type'] != 'anchor']
             fig = plt.figure()
-            gen.show_map(fig, refs=refs, pts=pts, readings=readings, est=mp)
+            gen.show_map(fig, points, readings[readings['invalid'] == False], pts)
             fig.show()
             continue
             
@@ -293,12 +297,12 @@ def main():
             
         if cmd == 'i':
             while True:
-                rid = raw_input('which reading to invalidate? ("$" to quit) ')
-                if rid == '$':
-                    continue
+                rid = raw_input('which reading to toggle validity? (CR to quit) ')
+                if rid == '':
+                    break
                 try:
                     rid = int(rid)    
-                    readings.loc[rid, 'invalid'] = True
+                    readings.loc[rid, 'invalid'] = readings.loc[rid, 'invalid'] == False
                 except:
                     pass
                 
@@ -311,12 +315,14 @@ def main():
                 s: save file
                 n: new point
                 l: load file
-                i: invalidate reading
+                i: toggle valid flag on reading
                 p: print values
                 m: map values
                 c: connect to TruPulse
-                v: get version
+                v: get TruPulse version
+                w: invalidate reading with worst deviation
                 r: repeat last meas
+                w:
                 q: quit
                 """
             continue
