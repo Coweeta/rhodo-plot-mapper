@@ -225,6 +225,7 @@ def main():
             
             
         if cmd == 'e':
+            readings['invalid'] = readings['invalid'] == True
             refs = points.loc[points['type'] == 'anchor']
             mp = points.loc[points['type'] != 'anchor']
             mp = gen.solve(refs, readings, mp)
