@@ -7,11 +7,15 @@ from scipy.optimize import leastsq
 def gen_points_and_readings(edge_len, num_est, rpp, err):
     refs = gen_ref_points(edge_len)
     refs['type'] = 'anchor'
+    refs['locked'] = True
     actual = gen_meas_points(edge_len, num_est)
     actual['type'] = 'tree'
+    actual['locked'] = False
     readings = gen_readings(refs, actual, rpp, err)
-    est = solve(refs, readings, actual)
-    points =  pd.concat((refs, est))
+    
+    unknown = actual.copy()
+    unknown[['ew','ns']] = np.nan
+    points = pd.concat((refs, unknown))
     return points, readings, actual
     
     
@@ -55,51 +59,63 @@ def gen_readings(refs, points, num_per_point, err):
     return readings
 
 
-def residual(x, xref, f, t, dm, Np):
-    xcomp = x[:Np] + 1j * x[Np:]
-    xall = np.hstack((xcomp, xref))
-    xt = xall[t]
-    xf = xall[f]
+def residual(coord_vec, vec_map, point_coords, from_point, to_point, from_to_delta):
+    """Callback for scipy.optimize.leastsq() to place points
     
-    err = np.abs(dm - (xt - xf))
-    return err
+    
+    """
+    # Write the iterated coordinates back into the DataFrame
+    num_points = len(coord_vec) / 2
+    point_coords.loc[vec_map,'ew'] = coord_vec[num_points:]
+    point_coords.loc[vec_map,'ns'] = coord_vec[:num_points]
+        
+    err = point_coords.loc[from_point].values + from_to_delta.values - point_coords.loc[to_point].values
+    
+    return err.flatten()
 
 
-def solve(refs, readings, points):
+def place_unlocked_points(points, readings):
+    """
+    :param points: list of all points.  Updated by function
+    :type points: pandas.DataFrame
+    
+    
+    *points* is updated.
+    *readings* is updated.
+    
+    """
     valid = readings['invalid'] == False
     valid_readings = readings[valid]
     names = points.index
-    xpp = np.hstack((points['ew'].values, points['ns'].values))
+    
+    locked = points['locked']
+    fluid_points = points[~locked]
+    
+    # Construct a flat numpy array of coordinates
+    xpp = np.hstack((fluid_points['ew'].values, fluid_points['ns'].values)) #TEMP!!!  leastsq flattens
     xpp = np.nan_to_num(xpp)
 
-    xref = refs['ns'].values + 1j * refs['ew'].values
     angle = np.pi * valid_readings['azim'].values / 180
     dist = valid_readings['hdist'].values
-    dm = dist * np.exp(1j * angle)
+    from_to_delta = pd.DataFrame({'ew': dist * np.sin(angle), 'ns': dist * np.cos(angle)})
 
-    a = pd.concat((points, refs))
-    ti = [a.index.get_loc(t) for t in valid_readings['to']]
-    fi = [a.index.get_loc(f) for f in valid_readings['from']]
+    point_coords = points[['ew','ns']].copy()
+    args = (~locked, point_coords, valid_readings['from'], valid_readings['to'], from_to_delta)
+    plsq = leastsq(residual, xpp, args=args)
 
-    plsq = leastsq(residual, xpp, args=(xref, fi, ti, dm, len(points)))
+    ew = plsq[0][len(fluid_points):]
+    ns = plsq[0][:len(fluid_points)]
 
-    est = pd.DataFrame({'ew':plsq[0][len(points):], 'ns':plsq[0][:len(points)]}, index=names)
-    est['type'] = points['type']
+    points.loc[~locked, 'ew'] = ew
+    points.loc[~locked, 'ns'] = ns
+    
+    est_of_readings = points.loc[valid_readings['to'],['ew','ns']].values - from_to_delta.values
+    deviation = points.loc[valid_readings['from'],['ew','ns']].values - est_of_readings
 
-    all_points = pd.concat((est, refs))
+    readings.loc[valid,'dev'] = np.sqrt(deviation[:,0] ** 2 + deviation[:,1] ** 2)
 
-    nsp = all_points.loc[valid_readings['to']]['ns'].values - dm.real
-    ewp = all_points.loc[valid_readings['to']]['ew'].values - dm.imag
-
-    nse = all_points.loc[valid_readings['from']]['ns'].values - nsp
-    ewe = all_points.loc[valid_readings['from']]['ew'].values - ewp
-
-    readings.loc[valid,'dev'] = np.sqrt(nse**2 + ewe**2)
     readings.loc[~valid,'dev'] = np.nan
     
-    return est
-
-
 
 
 def stuff(readings, refs, points, anchor_to):
