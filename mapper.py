@@ -1,11 +1,12 @@
-import laser_range
-import gen
-import sys
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from time import sleep
 import pyttsx
+
+import laser_range
+import map_solver
+import map_display
 
 
 def say(text):
@@ -36,52 +37,75 @@ def redo(self, args):
     
 """
 
+def deviates(r1, r2):
+    delta_dist = abs(r1['horz_dist'] - r2['horz_dist'])
+    if delta_dist > 0.2:
+        return True
+    # http://stackoverflow.com/questions/1878907/the-smallest-difference-between-2-angles    
+    rotation = r1['azimuth'] - r2['azimuth']
+    delta_angle = abs((rotation + 180.0) % 360.0 - 180.0)
+    if delta_angle > 1.0:
+        return True
+        
+    return False    
+        
+    
 
-def multi_reading(tp, new_vector=True, prev_reading=None, repeats=3):   
+def multi_reading(tp, new_vector=True, prev_reading=None, max_goes=4):   
+    """Reads from the TruPulse until there are two good, matching readings.
     
-    readings = []
+    """
     
-    for i in range(repeats):
-        say('click {}'.format(i+1))
-        reading = tp.get_reading()
-        if reading is None:
-            print "TruPulse reported an error."
-            say('error')
-        inaccuracy_flag = int(100 * reading['horz_dist']) % 2
-        if inaccuracy_flag:
-            print "reading inaccurate ({})".format(reading)
-            say('inaccurate')
-        readings.append(reading)
-        sleep(1)
     
-    if new_vector and prev_reading and prev_reading == readings[0]:
+    goes = 0
+    last = None
+    while True:
+        if goes == max_goes:
+            say("Give up")
+            return None
+        goes += 1
+        
+        got = single_reading(tp, new_vector, prev_reading)
+        if got:
+            if not last:
+                last = got
+                continue
+            if deviates(got, last):
+                say("deviates")
+                last = got
+                continue
+            
+            # we've got two consecutive readings
+            break    
+                
+        
+    say('Got {:0.1f} meters bearing {}'.format(got['horz_dist'], bearing(got['azimuth'])))
+    return got
+    
+        
+        
+def single_reading(tp, new_vector=True, prev_reading=None):     
+    say('click')
+    
+    reading = tp.get_reading()
+    if reading is None:
+        print "TruPulse reported an error."
+        say('error')
+        return None
+        
+    # messy way of checking 2nd decimal place is non-zero    
+    inaccuracy_flag = int(round(100 * reading['horz_dist'])) % 10 != 0
+    if inaccuracy_flag:
+        print "dist reading inaccurate ({})".format(reading)
+        say('inaccurate')
+        return None
+        
+    if new_vector and prev_reading and prev_reading == reading:
         print "got duplicate ({})".format(reading)
         say('duplicate')
-        readings.pop(0)
-        
-    if not readings:
-        say("no readings")
         return None
         
-    d = [r['horz_dist'] for r in readings]
-    a = [r['azimuth'] for r in readings]    
-
-    if a[0] > 270 or a[0] < 90:
-        # we're pointing around north; change azimuth range to -180 to 180
-        for i, x in enumerate(a):
-            if x > 180:
-                a[i] = x - 360.0
-
-    d_spread = max(d) - min(d)
-    a_spread = max(a) - min(a)
-    if d_spread > 0.2 or a_spread > 1.0:
-        say("variation")
-        print d_spread, a_spread, readings
-        return None
-        
-        
-    say('Got {:0.1f} meters bearing {}'.format(d[0], bearing(a[0])))
-    return readings[0]
+    return reading
     
 
 
@@ -128,6 +152,7 @@ def create_point(points):
         except:
             continue
         if sort == 'anchor':
+            locked = True
             ew = raw_input("East-west location: ")
             ns = raw_input("North-south location: ")
             try:
@@ -139,7 +164,8 @@ def create_point(points):
         else:
             ew = np.nan
             ns = np.nan
-        points.loc[name] = {'type': sort, 'ew': ew, 'ns': ns}  
+            locked = False
+        points.loc[name] = {'type': sort, 'ew': ew, 'ns': ns, 'locked': locked}  
 
         break
 
@@ -158,6 +184,11 @@ def get_name(text, default):
         name = default
     return name
        
+def count_down(delay):
+    for i in range(delay, 0, -1):
+        say(str(i))
+        sleep(1)
+       
 
 def main():
     dev_name = None
@@ -165,7 +196,7 @@ def main():
     reading_filename = "readings.xlsx"
     
     readings = pd.DataFrame(columns=('azim', 'hdist', 'from', 'to', 'dev', 'invalid'))
-    points = pd.DataFrame(columns=('type', 'ew', 'ns'))
+    points = pd.DataFrame(columns=('type', 'ew', 'ns', 'locked'))
     
     say('Hello mapper.')
     
@@ -174,9 +205,20 @@ def main():
     last = None
     
     tp = None
+    
+    delay = 0
+    
     while True:
         cmd = raw_input('Action: ("?" for help) ')
         
+        if cmd == 'x':
+            delay_str = raw_input("Delay before reading (sec): ")
+            try:
+                delay = int(delay_str)
+            except:
+                print "ignored"
+            continue                
+            
         if cmd == 'l':
             point_filename = get_name("Device name", point_filename)
             reading_filename = get_name("Device name", reading_filename)
@@ -190,7 +232,7 @@ def main():
         if cmd == 'c':
             dev_name = get_name("Device name", "/dev/rfcomm0")
             try:
-                tp = laser_range.TruPulseInterface(dev_name, trace=True)
+                tp = laser_range.TruPulseInterface(dev_name, do_trace=True)
                 print 'got unit'
                 
                 
@@ -226,10 +268,7 @@ def main():
             
         if cmd == 'e':
             readings['invalid'] = readings['invalid'] == True
-            refs = points.loc[points['type'] == 'anchor']
-            mp = points.loc[points['type'] != 'anchor']
-            mp = gen.solve(refs, readings, mp)
-            points = pd.concat((refs, mp))
+            mp = map_solver.place_unlocked_points(points, readings)
             print points
             print readings
             continue
@@ -252,7 +291,7 @@ def main():
             refs = points.loc[points['type'] == 'anchor']
             mp = points.loc[points['type'] != 'anchor']
             fig = plt.figure()
-            gen.show_map(fig, points, readings[readings['invalid'] == False], pts)
+            map_display.show_map(fig, points, readings[readings['invalid'] == False], pts)
             fig.show()
             continue
             
@@ -266,11 +305,15 @@ def main():
             continue
             
         if cmd == 't':
+            if not loc:
+                print "where are you?"
+                continue
             name = raw_input("Target's name: ")
             if not name or name not in points.index:
                 print "Bad name."
                 continue
             target = name
+            count_down(delay)
             r = multi_reading(tp, prev_reading=last)
             if r is not None:
                 last = r
@@ -278,6 +321,11 @@ def main():
             continue        
            
         if cmd == 'r':
+            if not loc or not target:
+                say("huh?")
+                print "repeat what?"
+                continue
+            count_down(delay)
             r = multi_reading(tp, prev_reading=last, new_vector=False)
             if r is not None:
                 last = r
@@ -323,7 +371,7 @@ def main():
                 v: get TruPulse version
                 w: invalidate reading with worst deviation
                 r: repeat last meas
-                w:
+                x: set delay before reading
                 q: quit
                 """
             continue

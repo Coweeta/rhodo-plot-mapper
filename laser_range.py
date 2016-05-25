@@ -20,6 +20,7 @@ import re
 import serial
 import pynmea2
 import time  #TEMP!!! 
+from datetime import datetime as dt
 
 class TruPulseException(Exception):
     """Something wrong from the TruPulse."""
@@ -65,10 +66,12 @@ def parse_list_result(match_list, raw_list):
 class TruPulseInterface(object):
 
 
-    def __init__(self, dev_name, trace=False, timeout=20.0):
+    def __init__(self, dev_name, do_trace=False, timeout=20.0):
         self.timeout = timeout
         self.ser = serial.Serial(port=dev_name, baudrate=38400, timeout=self.timeout)
-        self.trace = trace
+        self._do_trace = do_trace
+        self._clear_buf = False
+        self._pre_crlf = True
 
 
     def _send_command(self, cmd, expect_okay=True):
@@ -76,17 +79,20 @@ class TruPulseInterface(object):
 
         text = "${}\r\n".format(cmd)
 
-        self.ser.write("\r\n")      #TEMP!!! 
-        time.sleep(0.1)
+        if self._pre_crlf:
+            self.ser.write("\r\n")      #TEMP!!! 
+            self._trace(">>>", "")
+            time.sleep(0.1)
         
         
-        if self.trace:
+        if self._clear_buf:
             self.ser.timeout = 0.0
             left = self.ser.read(10000)
-            if left:
-                print "XXX", left
             self.ser.timeout = self.timeout
-            print ">>>", text.strip()
+            if left:
+                self._trace("XXX", left)
+            
+        self._trace(">>>", text.strip())
 
         self.ser.write(text)
 
@@ -95,10 +101,15 @@ class TruPulseInterface(object):
             assert ack == "$OK"
 
 
+    def _trace(self, direction, text):
+        if self._do_trace:
+            timestamp = dt.strftime(dt.now(), '%T')
+            print '{} {} "{}"'.format(timestamp, direction, text)
+
+
     def _readline(self):
         text = self.ser.readline().strip()
-        if self.trace:
-            print "<<<", text
+        self._trace("<<<", text)
         return text
 
 
@@ -229,11 +240,16 @@ if __name__ == "__main__":
             tp._send_command(cmd)
         except:
             print "fault"
-        
+
+    def multiread():
+        for i in range(5):
+            tp.get_reading()
+            time.sleep(1.0)
 
     dev_name = sys.argv[1]
     "/dev/rfcomm0"
-    tp = TruPulseInterface(dev_name, trace=True)
+    tp = TruPulseInterface(dev_name, do_trace=True)
+    time.sleep(1)
     tp.set_horiz_vector_mode()
 
     commands = [
@@ -245,6 +261,7 @@ if __name__ == "__main__":
         ('turn_off', tp.turn_off),
         ('stop_measurement', tp.stop_measurement),
         ('get_firmware_version', tp.get_firmware_version),
+        ('multiread', multiread),
         ('custom command', hand_roll)]
 
     cont = True
